@@ -1,9 +1,8 @@
 import React from "react";
-import { Cloud, FlaskConical, Gauge, Globe, Monitor, Palette, Settings, UserRound } from "lucide-react";
+import { FlaskConical, Gauge, Globe, Monitor, Palette, Settings, UserRound } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { LimitsSettingsPanel } from "../components/LimitsSettingsPanel.jsx";
 import { AccountSection } from "../components/settings/AccountSection.jsx";
-import { CloudSection } from "../components/settings/CloudSection.jsx";
 import { useAccountProfileSettings } from "../components/settings/useAccountProfileSettings.js";
 import { AppearanceSection } from "../components/settings/AppearanceSection.jsx";
 import { LabsSection } from "../components/settings/LabsSection.jsx";
@@ -74,6 +73,7 @@ export function SettingsPage() {
   const requestedSection = searchParams.get("section");
   const requestedSectionAvailable =
     Object.values(SETTINGS_SECTION_IDS).includes(requestedSection) &&
+    requestedSection !== SETTINGS_SECTION_IDS.CLOUD &&
     (requestedSection !== SETTINGS_SECTION_IDS.NATIVE_APP || nativeSettingsAvailable) &&
     (requestedSection !== SETTINGS_SECTION_IDS.NETWORK || proxySettingsAvailable) &&
     (requestedSection !== SETTINGS_SECTION_IDS.LOCAL_DATA || isLocalDashboardHost());
@@ -127,14 +127,6 @@ export function SettingsPage() {
       group: SETTINGS_GROUP_IDS.PERSONAL,
       Icon: UserRound,
       content: <AccountSection settings={accountSettings} />,
-    },
-    {
-      id: SETTINGS_SECTION_IDS.CLOUD,
-      label: copy("settings.section.cloud"),
-      description: copy("settings.section.cloud.description"),
-      group: SETTINGS_GROUP_IDS.PERSONAL,
-      Icon: Cloud,
-      content: <CloudSection settings={accountSettings} active={activeSection === SETTINGS_SECTION_IDS.CLOUD} />,
     },
     {
       id: SETTINGS_SECTION_IDS.LIMITS,

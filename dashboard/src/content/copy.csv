@@ -348,6 +348,9 @@ nav.usage,shared,*,Sidebar,nav_usage,"Tokens",,active
 nav.limits,shared,*,Sidebar,nav_limits,"Limits",,active
 nav.widgets,shared,*,Sidebar,nav_widgets,"Menu Bar & Widgets",,active
 nav.leaderboard,shared,*,Sidebar,nav_leaderboard,"Leaderboard",,active
+open.sync.title,shared,OpenSyncPage,OpenSyncPage,title,"GitHub sync",,active
+open.sync.body,shared,OpenSyncPage,OpenSyncPage,body,"OpenTokenTracker does not include the paid cloud membership or the global leaderboard. Usage stays on this computer. Publish a summary to your own GitHub repository with a personal access token.",,active
+open.sync.command,shared,OpenSyncPage,OpenSyncPage,command,"node bin/tracker.js github-profile-sync setup --repo owner/name --token-file token.txt",,active
 nav.collapse,shared,*,Sidebar,nav_collapse,"Collapse sidebar",,active
 nav.expand,shared,*,Sidebar,nav_expand,"Expand sidebar",,active
 nav.menu,shared,*,Sidebar,nav_menu,"Open navigation menu",,active

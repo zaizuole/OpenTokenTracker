@@ -71,11 +71,8 @@ const AchievementsPage = lazy(() => import("./pages/AchievementsPage.jsx"));
 const LandingPage = lazy(() =>
   import("./pages/LandingPage.jsx").then((m) => ({ default: m.LandingPage })),
 );
-const LeaderboardPage = lazy(() =>
-  import("./pages/LeaderboardPage.jsx").then((m) => ({ default: m.LeaderboardPage })),
-);
-const LeaderboardProfilePage = lazy(() =>
-  import("./pages/LeaderboardProfilePage.jsx").then((m) => ({ default: m.LeaderboardProfilePage })),
+const OpenSyncPage = lazy(() =>
+  import("./pages/OpenSyncPage.jsx").then((m) => ({ default: m.OpenSyncPage })),
 );
 const LimitsPage = lazy(() =>
   import("./pages/LimitsPage.jsx").then((m) => ({ default: m.LimitsPage })),
@@ -90,12 +87,6 @@ const DevicePage = lazy(() => import("./pages/DevicePage.jsx"));
 const WrappedPage = lazy(() => import("./pages/WrappedPage.jsx"));
 const SettingsPage = lazy(() =>
   import("./pages/SettingsPage.jsx").then((m) => ({ default: m.SettingsPage })),
-);
-const CloudPage = lazy(() =>
-  import("./pages/CloudPage.jsx").then((m) => ({ default: m.CloudPage })),
-);
-const CloudCheckoutPage = lazy(() =>
-  import("./pages/CloudCheckoutPage.jsx").then((m) => ({ default: m.CloudCheckoutPage })),
 );
 const SelfHostPage = lazy(() =>
   import("./pages/SelfHostPage.jsx").then((m) => ({ default: m.SelfHostPage })),
@@ -260,18 +251,12 @@ export default function App() {
   if (isLimitsPath || isSettingsPath || isCloudPath || isCheckoutPath || isSelfHostPath || isSkillsPath || isSessionsPath || isWidgetsPath || isPetPath || isIpCheckPath || isServiceStatusPath || isAchievementsPath) gate = "dashboard";
 
   let PageComponent = DashboardPage;
-  if (profileUserId) {
-    PageComponent = LeaderboardProfilePage;
-  } else if (normalizedPath === "/leaderboard") {
-    PageComponent = LeaderboardPage;
+  if (profileUserId || normalizedPath === "/leaderboard" || isCloudPath || isCheckoutPath) {
+    PageComponent = OpenSyncPage;
   } else if (isLimitsPath) {
     PageComponent = LimitsPage;
   } else if (isSettingsPath) {
     PageComponent = SettingsPage;
-  } else if (isCloudPath) {
-    PageComponent = CloudPage;
-  } else if (isCheckoutPath) {
-    PageComponent = CloudCheckoutPage;
   } else if (isSelfHostPath) {
     PageComponent = SelfHostPage;
   } else if (isSkillsPath) {

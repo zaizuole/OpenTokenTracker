@@ -2552,6 +2552,14 @@ function createLocalApiHandler({ queuePath, serverVersion = null, trackerDataDir
         } catch {
           body = {};
         }
+        if (process.env.TOKENTRACKER_OPEN === "1") {
+          body.drain = false;
+          body.publishAccount = false;
+          body.cloudSessionId = undefined;
+          body.deviceToken = undefined;
+          body.insforgeBaseUrl = undefined;
+          body.expectedOwnerId = undefined;
+        }
         const currentRuntime = getRuntime();
         if (body.drain === true || body.cloudSessionId || body.insforgeBaseUrl || body.expectedOwnerId) assertInsforgeRuntime(currentRuntime);
         const extraEnv = { TOKENTRACKER_CLOUD_RECHECK: "0", TOKENTRACKER_INSFORGE_BASE_URL: currentRuntime.baseUrl, TOKENTRACKER_INSFORGE_ANON_KEY: currentRuntime.anonKey || "" };

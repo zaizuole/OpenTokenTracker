@@ -215,47 +215,11 @@ describe("SettingsPage category navigation", () => {
     expect(accountPanel).not.toHaveAttribute("hidden");
   });
 
-  it("opens the dedicated Personal Cloud panel from its deep link with one shared account state", async () => {
-    const { container } = renderSettings("/settings?section=cloud&source=trial");
-    const cloudButton = screen.getByRole("button", { name: "Cloud", exact: true });
-    const accountButton = screen.getByRole("button", { name: "Account", exact: true });
-    const cloudPanel = container.querySelector('[data-settings-panel="cloud"]');
-    const accountPanel = container.querySelector('[data-settings-panel="account"]');
-    expect(profileSettingsMock.hook).toHaveBeenCalledTimes(1);
-    expect(profileSettingsMock.accountReceived).toBe(profileSettingsMock.settings);
-    expect(profileSettingsMock.cloudReceived).toBe(profileSettingsMock.settings);
-    expect(cloudButton).toHaveAttribute("aria-current", "page");
-    expect(cloudButton).toHaveAttribute("aria-controls", "settings-panel-cloud");
-    expect(cloudPanel).toHaveAttribute("aria-labelledby", "settings-nav-cloud");
-    expect(cloudPanel).not.toHaveAttribute("hidden");
-    expect(container.firstChild).toHaveClass("tt-cloud-settings");
-    expect(screen.queryByText("Cloud membership, billing and sync")).not.toBeInTheDocument();
-    expect(accountPanel).toHaveAttribute("hidden");
-    expect(cloudButton.closest("nav").textContent).toContain("Personal");
-    await act(async () => { await userEvent.click(accountButton); });
-    expect(screen.getByTestId("location")).toHaveTextContent("/settings?section=account&source=trial");
-    expect(accountButton).toHaveFocus();
-    expect(accountPanel).not.toHaveAttribute("hidden");
-    expect(cloudPanel).toHaveAttribute("hidden");
-    expect(container.firstChild).not.toHaveClass("tt-cloud-settings");
-    await act(async () => { await userEvent.click(cloudButton); });
-    expect(cloudButton).toHaveFocus();
-    expect(container.firstChild).toHaveClass("tt-cloud-settings");
-    expect(screen.getByTestId("location")).toHaveTextContent("/settings?section=cloud&source=trial");
-    expect(screen.getByTestId("account-content")).toBeInTheDocument();
-    expect(screen.getByTestId("cloud-content")).toBeInTheDocument();
-  });
-
-  it("deactivates Cloud portals on browser Back while retaining the shared account section state", async () => {
-    renderSettings(["/settings?section=account", "/settings?section=cloud"]);
-    expect(profileSettingsMock.cloudActive).toBe(true);
-    await act(async () => { profileSettingsMock.navigate(-1); });
-    expect(screen.getByTestId("location")).toHaveTextContent("/settings?section=account");
-    expect(profileSettingsMock.cloudActive).toBe(false);
-    expect(screen.getByTestId("cloud-content")).toBeInTheDocument();
-    expect(profileSettingsMock.cloudReceived).toBe(profileSettingsMock.settings);
-    await act(async () => { profileSettingsMock.navigate(1); });
-    expect(profileSettingsMock.cloudActive).toBe(true);
+  it("does not offer the paid cloud settings section", () => {
+    renderSettings("/settings?section=cloud");
+    expect(screen.queryByRole("button", { name: "Cloud", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cloud-content")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Appearance", exact: true })).toHaveAttribute("aria-current", "page");
   });
 
   it("omits the network category when the local proxy API is unavailable", () => {

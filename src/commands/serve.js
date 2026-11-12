@@ -67,6 +67,7 @@ function getLocalServerUrl(port) {
 }
 
 async function cmdServe(argv) {
+  process.env.TOKENTRACKER_OPEN = "1";
   const opts = parseArgs(argv);
 
   // An explicit port may already belong to this exact installation (for

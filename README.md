@@ -1,6 +1,12 @@
  <div align="center">
 
-# Token Tracker
+# OpenTokenTracker
+
+这是 [TokenTracker](https://github.com/xiufengsun/TokenTracker) 的公开分支。官方付费云会员、云同步上传和全球排行榜已从界面移除。用量留在本机，用 GitHub token 同步到你自己的仓库：
+
+```bash
+node bin/tracker.js github-profile-sync setup --repo owner/name --token-file token.txt
+```
 
 **English** · [简体中文](./README.zh-CN.md) · [日本語](./README.ja.md) · [한국어](./README.ko.md) · [Deutsch](./README.de.md)
 
@@ -17,8 +23,6 @@ An accurate, local-first token usage and cost dashboard for **47 AI coding tools
 [![Windows app](https://img.shields.io/badge/Windows%20app-system%20tray-lightgrey.svg?logo=windows&logoColor=white)](https://github.com/xiufengsun/TokenTracker/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/xiufengsun/TokenTracker?style=social)](https://github.com/xiufengsun/TokenTracker/stargazers)
 [![Featured in 阮一峰周刊 #393](https://img.shields.io/badge/Featured%20in-%E9%98%AE%E4%B8%80%E5%B3%B0%E5%91%A8%E5%88%8A%20%23393-FF6B35?logo=rss&logoColor=white)](https://github.com/ruanyf/weekly/blob/master/docs/issue-393.md)
-[![Author tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=0652839f-d19f-4f67-af85-6b7675875443&metric=tokens&compact=1&label=author%20tokens)](https://github.com/xiufengsun/TokenTracker)
-
 <br/>
 
 <strong>📊 See the token dashboard in action</strong>

@@ -4,7 +4,6 @@ import {
   Award,
   BarChart3,
   Gauge,
-  Trophy,
   History,
   LayoutGrid,
   PawPrint,
@@ -19,7 +18,6 @@ import {
   Sun,
   Moon,
   Monitor,
-  Cloud,
 } from "lucide-react";
 import { copy } from "../../lib/copy";
 import { cn } from "../../lib/cn";
@@ -42,7 +40,6 @@ export function getNavGroups() {
         { id: "usage", to: "/dashboard", icon: BarChart3, label: copy("nav.usage") },
         { id: "sessions", to: "/sessions", icon: History, label: copy("nav.sessions") },
         { id: "limits", to: "/limits", icon: Gauge, label: copy("nav.limits") },
-        { id: "leaderboard", to: "/leaderboard", icon: Trophy, label: copy("nav.leaderboard") },
         { id: "achievements", to: "/achievements", icon: Award, label: copy("nav.achievements") },
       ],
     },
@@ -61,7 +58,6 @@ export function getNavGroups() {
       id: "account",
       label: copy("nav.group.account"),
       items: [
-        { id: "cloud", to: "/cloud", icon: Cloud, label: copy("cloud.nav") },
         { id: "settings", to: "/settings", icon: SettingsIcon, label: copy("nav.settings") },
       ],
     },
