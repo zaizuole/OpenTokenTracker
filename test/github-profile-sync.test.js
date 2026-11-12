@@ -14,12 +14,17 @@ const {
   buildUsageSnapshot,
   contentHash,
   filesForSnapshot,
+  githubRequest,
   localSummaryUrl,
   lockPathFor,
+  parseRepo,
   publishProfile,
+  publishToGitHub,
   releaseLock,
   renderLaunchAgentPlist,
+  resolveToken,
   updateReadme,
+  writeConfig,
 } = require("../src/lib/github-profile-sync");
 
 const SECRET = "SUPER_SECRET_PROMPT";
@@ -189,7 +194,9 @@ test("dedupes buckets, splits Shanghai days, and matches the local API", async (
     assert.equal(packed.includes(secret), false, secret);
   }
   assert.equal(packed.includes("\"model\""), false);
-  assert.equal(files.get("README.md").includes("不含排名"), true);
+  assert.match(files.get("README.md"), /内容更新时间：/);
+  assert.equal(files.get("README.md").includes("本机 TokenTracker"), false);
+  assert.equal(files.get("README.md").includes("不含排名"), false);
   assert.equal(files.get("README.md").includes("rank"), false);
 });
 
@@ -255,6 +262,21 @@ test("publish is idempotent and refuses foreign edits, divergence, and a failed 
   assert.equal(second.commit, first.commit);
   assert.equal(git(profile, ["rev-list", "--count", "HEAD"]).trim(), "2");
 
+  const readmePath = path.join(profile, "README.md");
+  fs.writeFileSync(readmePath, fs.readFileSync(readmePath, "utf8").replace(
+    "内容更新时间：",
+    "本机 TokenTracker 队列汇总，日期按 Asia/Shanghai。\n内容更新时间：",
+  ));
+  git(profile, ["add", "README.md"]);
+  git(profile, ["commit", "-m", "拉长说明"]);
+  git(profile, ["push", "origin", "HEAD:main"]);
+  const shortened = await publishProfile({ profileDir: profile, snapshot, now, push: true });
+  assert.equal(shortened.status, "published");
+  const shortenedReadme = fs.readFileSync(readmePath, "utf8");
+  assert.equal(shortenedReadme.includes("本机 TokenTracker"), false);
+  assert.match(shortenedReadme, /内容更新时间：/);
+  assert.equal(shortenedReadme.includes("手工备注保持不动"), true);
+
   fs.writeFileSync(path.join(profile, "NOTES.txt"), "用户的其他修改");
   await assert.rejects(
     publishProfile({ profileDir: profile, snapshot, now, push: true }),
@@ -309,4 +331,104 @@ test("publish is idempotent and refuses foreign edits, divergence, and a failed 
     publishProfile({ profileDir: profile, snapshot: zero, now, push: true }),
     (error) => error.code === "refusing_zero",
   );
+});
+
+test("repo config accepts owner/name and keeps the token private", () => {
+  assert.equal(parseRepo("https://github.com/octocat/profile.git"), "octocat/profile");
+  assert.throws(() => parseRepo("not a repo"), (error) => error.code === "bad_repo");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tt-github-config-"));
+  const file = path.join(dir, "github-sync.json");
+  const saved = writeConfig({ repo: "octocat/profile", token: "github_pat_example", file });
+  assert.equal(saved.hasToken, true);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  const stored = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.equal(stored.repo, "octocat/profile");
+  assert.equal(stored.token, "github_pat_example");
+  assert.equal(resolveToken({ token: "" }, { TOKENTRACKER_GITHUB_TOKEN: "from-env" }, () => ""), "from-env");
+  assert.equal(resolveToken({ token: "" }, {}, () => "from-gh"), "from-gh");
+});
+
+test("github error text does not keep the token", async () => {
+  const token = "github_pat_supersecretvalue";
+  await assert.rejects(
+    githubRequest({
+      token,
+      path: "/user",
+      fetchImpl: async (_url, options) => {
+        assert.equal(options.headers.Authorization, `Bearer ${token}`);
+        return {
+          ok: false,
+          status: 401,
+          statusText: "Unauthorized",
+          async text() { return JSON.stringify({ message: `bad ${token}` }); },
+        };
+      },
+    }),
+    (error) => error.code === "github_auth" && !String(error.message).includes(token),
+  );
+});
+
+test("token publish writes one commit and skips the same snapshot", async () => {
+  const blobs = new Map();
+  const files = new Map();
+  let ref = null;
+  let commits = 0;
+  const token = "github_pat_publish";
+  async function request({ token: got, method, path: apiPath, body }) {
+    assert.equal(got, token);
+    if (apiPath === "/repos/acme/profile/git/ref/heads/main" && method === "GET") {
+      if (!ref) throw Object.assign(new Error("missing"), { status: 404 });
+      return { object: { sha: ref } };
+    }
+    if (apiPath.startsWith("/repos/acme/profile/contents/")) {
+      const filePath = decodeURIComponent(apiPath.slice("/repos/acme/profile/contents/".length).split("?")[0]);
+      if (filePath === "data/tokentracker/daily") {
+        const names = [...files.keys()].filter((name) => name.startsWith("data/tokentracker/daily/"));
+        if (!names.length) throw Object.assign(new Error("missing"), { status: 404 });
+        return names.map((name) => ({ name: name.split("/").pop() }));
+      }
+      if (!files.has(filePath)) throw Object.assign(new Error("missing"), { status: 404 });
+      return { content: Buffer.from(files.get(filePath)).toString("base64") };
+    }
+    if (apiPath === "/repos/acme/profile/git/blobs") {
+      const text = Buffer.from(body.content, "base64").toString("utf8");
+      const sha = `blob${blobs.size + 1}`;
+      blobs.set(sha, text);
+      return { sha };
+    }
+    if (apiPath === "/repos/acme/profile/git/trees") {
+      for (const item of body.tree) {
+        if (item.sha == null) files.delete(item.path);
+        else files.set(item.path, blobs.get(item.sha));
+      }
+      return { sha: "tree" };
+    }
+    if (apiPath === "/repos/acme/profile/git/commits") {
+      commits += 1;
+      return { sha: `commit${commits}` };
+    }
+    if (apiPath === "/repos/acme/profile/git/refs" && method === "POST") {
+      ref = body.sha;
+      return { ref: body.ref, object: { sha: ref } };
+    }
+    if (apiPath === "/repos/acme/profile/git/refs/heads/main" && method === "PATCH") {
+      ref = body.sha;
+      return { object: { sha: ref } };
+    }
+    throw new Error(`unexpected ${method} ${apiPath}`);
+  }
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tt-github-api-"));
+  const queuePath = path.join(tmp, "queue.jsonl");
+  writeQueue(queuePath, [row({ total_tokens: 80, billable_total_tokens: 80, input_tokens: 50, output_tokens: 30 })]);
+  const snapshot = await buildUsageSnapshot({ queuePath, now: new Date("2026-11-12T03:00:00.000Z"), loadPricing: false });
+  const first = await publishToGitHub({ snapshot, repo: "acme/profile", token, request });
+  assert.equal(first.status, "published");
+  assert.equal(first.commit, "commit1");
+  assert.match(files.get("README.md"), /https:\/\/github.com\/acme\/profile/);
+  assert.match(files.get("README.md"), /内容更新时间：/);
+  assert.equal(files.get("README.md").includes("不含排名"), false);
+  const second = await publishToGitHub({ snapshot, repo: "acme/profile", token, now: new Date("2026-11-12T06:00:00.000Z"), request });
+  assert.equal(second.status, "unchanged");
+  assert.equal(commits, 1);
 });

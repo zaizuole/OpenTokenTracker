@@ -307,17 +307,16 @@ function badgeSvg({ label, value, color, titleId }) {
   ].join("\n");
 }
 
-function renderUsageBlock(snapshot) {
+function renderUsageBlock(snapshot, link = {}) {
+  const repo = link.repo || "zaizuole/zaizuole";
+  const branch = link.branch || "main";
+  const repoUrl = `https://github.com/${repo}`;
   const all = snapshot.all_time.totals;
   const today = snapshot.today_usage.totals;
-  const unpriced = Number(all.unpriced_total_tokens) > 0
-    ? "部分模型没有单价，对应用量没有被估成费用。"
-    : "";
   return [
-    `[![tokens](${TOKENS_SVG})](${CODE_REPO})`,
-    `[![estimated cost](${COST_SVG})](${PROFILE_REPO}/blob/main/${SUMMARY_PATH})`,
+    `[![tokens](${TOKENS_SVG})](${repoUrl})`,
+    `[![estimated cost](${COST_SVG})](${repoUrl}/blob/${branch}/${SUMMARY_PATH})`,
     ``,
-    `本机 TokenTracker 队列汇总，日期按 Asia/Shanghai。费用按模型单价估算，不是服务商实际扣款。单机数据，不含排名。${unpriced}`,
     `内容更新时间：${snapshot.content_updated_at}。累计 ${formatTokenCount(all.total_tokens)} tokens，估算 ${formatUsd(all.estimated_cost_usd)}。今日 ${formatTokenCount(today.total_tokens)} tokens，估算 ${formatUsd(today.estimated_cost_usd)}。`,
   ].join("\n");
 }
@@ -327,8 +326,8 @@ function isReplacedBadgeLine(line) {
     || /^\s*!\[[^\]]*\]\([^)]*\)\s*$/.test(line);
 }
 
-function updateReadme(existing, snapshot) {
-  const wrapped = `${USAGE_START}\n${renderUsageBlock(snapshot)}\n${USAGE_END}`;
+function updateReadme(existing, snapshot, link) {
+  const wrapped = `${USAGE_START}\n${renderUsageBlock(snapshot, link)}\n${USAGE_END}`;
   if (existing.includes(USAGE_START) && existing.includes(USAGE_END)) {
     return existing.replace(/<!-- tokentracker-usage:start -->[\s\S]*?<!-- tokentracker-usage:end -->/, wrapped);
   }
@@ -353,7 +352,7 @@ function readmeOutside(text) {
   return text.slice(0, start) + text.slice(end + USAGE_END.length);
 }
 
-function filesForSnapshot(snapshot, readme) {
+function filesForSnapshot(snapshot, readme, link) {
   const { months, ...summary } = snapshot;
   const files = new Map();
   files.set(SUMMARY_PATH, stableStringify(summary));
@@ -378,7 +377,7 @@ function filesForSnapshot(snapshot, readme) {
     color: "#2da44e",
     titleId: "cost-badge",
   }));
-  files.set(README_PATH, updateReadme(readme, snapshot));
+  files.set(README_PATH, updateReadme(readme, snapshot, link));
   return files;
 }
 
@@ -472,7 +471,8 @@ async function publishProfile({
     throw abort("refusing_zero", "新汇总为 0 而远端已有用量，已保留上次发布");
   }
   const published = withPublication(snapshot, previous, now);
-  if (previous?.content_sha256 === published.content_sha256) {
+  const readmeChanged = updateReadme(workingReadme, published) !== workingReadme;
+  if (previous?.content_sha256 === published.content_sha256 && !readmeChanged) {
     const managedDirty = dirty.filter(isManagedPath);
     if (managedDirty.length) runGit(profileDir, ["checkout", "--", ...managedDirty]);
     const ahead = push ? Number(runGit(profileDir, ["rev-list", "--count", "origin/main..HEAD"]).trim()) : 0;
@@ -544,13 +544,252 @@ function agentPlistPath() {
   return path.join(os.homedir(), "Library", "LaunchAgents", `${AGENT_LABEL}.plist`);
 }
 
+function configPath(home = os.homedir()) {
+  return path.join(home, ".tokentracker", "github-sync.json");
+}
+
+function parseRepo(value) {
+  const text = String(value || "").trim()
+    .replace(/^https:\/\/github\.com\//, "")
+    .replace(/\.git$/, "")
+    .replace(/\/$/, "");
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(text)) {
+    throw abort("bad_repo", "仓库要写成 owner/name，例如 octocat/profile");
+  }
+  return text;
+}
+
+function readConfig(file = configPath()) {
+  let raw;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw abort("config_missing", `还没有同步配置。先运行 setup --repo owner/name。文件：${file}`);
+    }
+    throw error;
+  }
+  const parsed = JSON.parse(raw);
+  const branch = String(parsed.branch || "main").trim();
+  if (!/^[A-Za-z0-9._/-]+$/.test(branch)) throw abort("bad_branch", "分支名不合法");
+  return {
+    repo: parseRepo(parsed.repo),
+    branch,
+    token: typeof parsed.token === "string" ? parsed.token.trim() : "",
+    path: file,
+  };
+}
+
+function writeConfig({ repo, branch = "main", token = "", file = configPath() } = {}) {
+  const saved = { repo: parseRepo(repo), branch: String(branch || "main").trim() };
+  if (!/^[A-Za-z0-9._/-]+$/.test(saved.branch)) throw abort("bad_branch", "分支名不合法");
+  const secret = String(token || "").trim();
+  if (secret) saved.token = secret;
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, `${JSON.stringify(saved, null, 2)}\n`, { mode: 0o600 });
+  fs.chmodSync(file, 0o600);
+  return { repo: saved.repo, branch: saved.branch, hasToken: Boolean(secret), path: file };
+}
+
+function readGhToken() {
+  const result = spawnSync("gh", ["auth", "token"], { encoding: "utf8" });
+  if (result.status !== 0) return "";
+  return String(result.stdout || "").trim();
+}
+
+function resolveToken(config, env = process.env, ghToken = readGhToken) {
+  if (config.token) return config.token;
+  const fromEnv = String(env.TOKENTRACKER_GITHUB_TOKEN || "").trim();
+  if (fromEnv) return fromEnv;
+  const fromGh = typeof ghToken === "function" ? String(ghToken() || "").trim() : "";
+  if (fromGh) return fromGh;
+  throw abort("token_missing", "没有 GitHub token。把 token 写进配置，或设置 TOKENTRACKER_GITHUB_TOKEN，或先 gh auth login。");
+}
+
+function tokenSource(config, env = process.env, ghToken = readGhToken) {
+  if (config.token) return "配置文件";
+  if (String(env.TOKENTRACKER_GITHUB_TOKEN || "").trim()) return "环境变量";
+  if (typeof ghToken === "function" && String(ghToken() || "").trim()) return "gh";
+  return "未配置";
+}
+
+async function githubRequest({ token, method = "GET", path: apiPath, body, fetchImpl = fetch } = {}) {
+  let response;
+  try {
+    response = await fetchImpl(`https://api.github.com${apiPath}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "User-Agent": "tokentracker-github-profile-sync",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (error) {
+    throw abort("github_unavailable", `GitHub 连不上：${redact(error.message || error)}`);
+  }
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text.slice(0, 200) };
+    }
+  }
+  if (!response.ok) {
+    const status = response.status;
+    const message = redact(data?.message || response.statusText || "GitHub 请求失败");
+    const code = status === 401 || status === 403 ? "github_auth" : "github_failed";
+    throw Object.assign(new Error(`GitHub ${status}：${message}`), { code, status });
+  }
+  return data;
+}
+
+function decodeGitHubFile(data) {
+  if (!data || Array.isArray(data) || typeof data.content !== "string") return null;
+  return Buffer.from(data.content.replace(/\n/g, ""), "base64").toString("utf8");
+}
+
+async function publishToGitHub({
+  snapshot,
+  repo,
+  branch = "main",
+  token,
+  now = new Date(),
+  allowEmpty = false,
+  request = githubRequest,
+} = {}) {
+  const target = parseRepo(repo);
+  const link = { repo: target, branch };
+  const root = `/repos/${target}`;
+  let parent = null;
+  try {
+    const ref = await request({ token, method: "GET", path: `${root}/git/ref/heads/${branch}` });
+    parent = ref.object.sha;
+  } catch (error) {
+    if (error.status !== 404 && error.status !== 409) throw error;
+  }
+
+  async function readRemote(filePath) {
+    if (!parent) return null;
+    try {
+      const data = await request({
+        token,
+        method: "GET",
+        path: `${root}/contents/${filePath}?ref=${encodeURIComponent(branch)}`,
+      });
+      return decodeGitHubFile(data);
+    } catch (error) {
+      if (error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  const previousText = await readRemote(SUMMARY_PATH);
+  let previous = null;
+  if (previousText) {
+    try {
+      previous = JSON.parse(previousText);
+    } catch {
+      previous = null;
+    }
+  }
+  if (!allowEmpty && Number(previous?.all_time?.totals?.total_tokens || 0) > 0 && snapshot.all_time.totals.total_tokens === 0) {
+    throw abort("refusing_zero", "新汇总为 0 而远端已有用量，已保留上次发布");
+  }
+  const readme = (await readRemote(README_PATH)) || "";
+  const published = withPublication(snapshot, previous, now);
+  const files = filesForSnapshot(published, readme, link);
+  if (previous?.content_sha256 === published.content_sha256 && files.get(README_PATH) === readme) {
+    return { status: "unchanged", commit: parent, snapshot: published, repo: target };
+  }
+
+  let remoteDaily = [];
+  if (parent) {
+    try {
+      const listing = await request({
+        token,
+        method: "GET",
+        path: `${root}/contents/${DAILY_DIR}?ref=${encodeURIComponent(branch)}`,
+      });
+      if (Array.isArray(listing)) {
+        remoteDaily = listing
+          .map((item) => `${DAILY_DIR}/${item.name}`)
+          .filter((filePath) => /^\d{4}-\d{2}\.json$/.test(filePath.slice(DAILY_DIR.length + 1)));
+      }
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+  }
+
+  const tree = [];
+  for (const [filePath, contents] of files) {
+    const blob = await request({
+      token,
+      method: "POST",
+      path: `${root}/git/blobs`,
+      body: { content: Buffer.from(contents).toString("base64"), encoding: "base64" },
+    });
+    tree.push({ path: filePath, mode: "100644", type: "blob", sha: blob.sha });
+  }
+  for (const filePath of remoteDaily) {
+    if (!files.has(filePath)) tree.push({ path: filePath, mode: "100644", type: "blob", sha: null });
+  }
+  const createdTree = await request({
+    token,
+    method: "POST",
+    path: `${root}/git/trees`,
+    body: parent ? { base_tree: parent, tree } : { tree },
+  });
+  let commit;
+  try {
+    commit = await request({
+      token,
+      method: "POST",
+      path: `${root}/git/commits`,
+      body: {
+        message: [
+          "同步本机 TokenTracker 用量汇总。",
+          "",
+          "只写入去重后的公开汇总。统计内容未变化时不提交。",
+          "",
+          "Co-authored-by: codex <codex@openai.com>",
+        ].join("\n"),
+        tree: createdTree.sha,
+        parents: parent ? [parent] : [],
+      },
+    });
+    if (parent) {
+      await request({
+        token,
+        method: "PATCH",
+        path: `${root}/git/refs/heads/${branch}`,
+        body: { sha: commit.sha, force: false },
+      });
+    } else {
+      await request({
+        token,
+        method: "POST",
+        path: `${root}/git/refs`,
+        body: { ref: `refs/heads/${branch}`, sha: commit.sha },
+      });
+    }
+  } catch (error) {
+    if (error.status === 422) throw abort("not_fast_forward", "远端已有新提交，未覆盖上次发布");
+    throw error;
+  }
+  return { status: "published", commit: commit.sha, snapshot: published, repo: target };
+}
+
 function renderLaunchAgentPlist({
   nodePath = process.execPath,
   trackerBin = path.join(repoRoot(), "bin", "tracker.js"),
-  profileDir = DEFAULT_PROFILE_DIR,
   home = os.homedir(),
 } = {}) {
-  const args = [nodePath, trackerBin, "github-profile-sync", "--profile", profileDir];
+  const args = [nodePath, trackerBin, "github-profile-sync"];
   const xmlArgs = args.map((arg) => `    <string>${xmlEscape(arg)}</string>`).join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -644,12 +883,21 @@ module.exports = {
   formatUsd,
   localSummaryUrl,
   lockPathFor,
+  configPath,
+  githubRequest,
+  parseRepo,
   publishProfile,
+  publishToGitHub,
+  readConfig,
   readDedupedQueue,
+  readGhToken,
+  resolveToken,
   redact,
   releaseLock,
   renderLaunchAgentPlist,
   renderUsageBlock,
+  tokenSource,
+  writeConfig,
   repoRoot,
   shanghaiStamp,
   updateReadme,

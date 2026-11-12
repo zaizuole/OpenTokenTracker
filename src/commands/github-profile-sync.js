@@ -7,16 +7,20 @@ const { spawnSync } = require("node:child_process");
 
 const {
   AGENT_LABEL,
-  DEFAULT_PROFILE_DIR,
   acquireLock,
   agentPlistPath,
   buildUsageSnapshot,
+  githubRequest,
   localSummaryUrl,
   lockPathFor,
-  publishProfile,
+  publishToGitHub,
+  readConfig,
   redact,
   releaseLock,
   renderLaunchAgentPlist,
+  resolveToken,
+  tokenSource,
+  writeConfig,
 } = require("../lib/github-profile-sync");
 const { resolveQueuePath } = require("../lib/local-api");
 
@@ -45,21 +49,25 @@ function parseArgs(argv) {
     dryRun: false,
     checkLocalApi: false,
     allowEmpty: false,
-    profileDir: process.env.TOKENTRACKER_GITHUB_PROFILE_DIR || DEFAULT_PROFILE_DIR,
     queuePath: resolveQueuePath(),
+    repo: "",
+    branch: "main",
+    tokenFile: "",
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--dry-run") opts.dryRun = true;
     else if (arg === "--check-local-api") opts.checkLocalApi = true;
     else if (arg === "--allow-empty") opts.allowEmpty = true;
-    else if (arg === "--profile" || arg === "--queue") {
+    else if (arg === "--repo" || arg === "--branch" || arg === "--token-file" || arg === "--queue" || arg === "--profile") {
       const value = argv[++index];
-      if (!value) throw Object.assign(new Error(`${arg} 缺少路径`), { code: "bad_args" });
-      if (arg === "--profile") opts.profileDir = value;
-      else opts.queuePath = value;
+      if (!value) throw Object.assign(new Error(`${arg} 缺少值`), { code: "bad_args" });
+      if (arg === "--repo") opts.repo = value;
+      else if (arg === "--branch") opts.branch = value;
+      else if (arg === "--token-file") opts.tokenFile = value;
+      else if (arg === "--queue") opts.queuePath = value;
     }
-    else if (arg === "install-agent" || arg === "uninstall-agent" || arg === "status" || arg === "help") opts.action = arg;
+    else if (arg === "setup" || arg === "install-agent" || arg === "uninstall-agent" || arg === "status" || arg === "help") opts.action = arg;
     else if (arg === "-h" || arg === "--help") opts.action = "help";
     else throw Object.assign(new Error(`未知参数: ${arg}`), { code: "bad_args" });
   }
@@ -68,15 +76,17 @@ function parseArgs(argv) {
 
 function printHelp() {
   process.stdout.write([
-    "把本机 TokenTracker 用量汇总同步到 zaizuole/zaizuole。",
+    "把本机 TokenTracker 用量汇总同步到配置好的 GitHub 仓库。",
     "",
-    "  github-profile-sync [--dry-run] [--check-local-api] [--queue 路径] [--profile 目录]",
+    "  github-profile-sync setup --repo owner/name [--branch main] [--token-file 文件]",
+    "  github-profile-sync [--dry-run] [--check-local-api] [--queue 路径]",
     "  github-profile-sync install-agent",
     "  github-profile-sync uninstall-agent",
     "  github-profile-sync status",
     "",
-    "默认每 15 分钟由本机 LaunchAgent 执行。统计没变不会提交。",
-    "关闭自动任务不会停止 TokenTracker 本身的采集。",
+    "token 放在 ~/.tokentracker/github-sync.json，文件权限 600。",
+    "不写 token 时使用 TOKENTRACKER_GITHUB_TOKEN，再否则使用本机 gh 登录。",
+    "token 需要目标仓库的 Contents 写权限。统计没变不会提交。",
     "",
   ].join("\n"));
 }
@@ -151,10 +161,28 @@ function uninstallAgent() {
   console.log("已关闭 GitHub 用量同步。TokenTracker 本地采集不受影响。");
 }
 
+function setup(opts) {
+  if (!opts.repo) throw Object.assign(new Error("setup 需要 --repo owner/name"), { code: "bad_args" });
+  const token = opts.tokenFile ? fs.readFileSync(opts.tokenFile, "utf8").trim() : "";
+  const saved = writeConfig({ repo: opts.repo, branch: opts.branch, token });
+  console.log(`已写入 ${saved.path}`);
+  console.log(`仓库 ${saved.repo}，分支 ${saved.branch}`);
+  console.log(saved.hasToken
+    ? "token 已写在本机配置里，权限 600。不会进入 Git 仓库。"
+    : "未保存 token。同步时使用 TOKENTRACKER_GITHUB_TOKEN，或本机已登录的 gh。");
+}
+
 function printStatus() {
   const print = launchctl(["print", `gui/${process.getuid()}/${AGENT_LABEL}`]);
   console.log(fs.existsSync(agentPlistPath()) ? `plist: ${agentPlistPath()}` : "plist: 未安装");
   console.log(print.status === 0 ? "launchd: 已加载" : "launchd: 未加载");
+  try {
+    const config = readConfig();
+    console.log(`仓库: ${config.repo}#${config.branch}`);
+    console.log(`token: ${tokenSource(config)}`);
+  } catch (error) {
+    console.log(redact(error.message));
+  }
   if (fs.existsSync(logFile())) {
     const lines = fs.readFileSync(logFile(), "utf8").trim().split("\n").slice(-8);
     console.log(lines.join("\n"));
@@ -171,19 +199,25 @@ async function sync(opts) {
     return;
   }
   try {
+    const config = readConfig();
+    const token = resolveToken(config);
     const built = await buildUsageSnapshot({ queuePath: opts.queuePath });
     if (opts.checkLocalApi) await checkAgainstLocalApi(built);
     if (opts.dryRun) {
-      console.log(`dry-run 累计 ${built.all_time.totals.total_tokens} tokens，估算 $${built.all_time.totals.estimated_cost_usd}，今日 ${built.today_usage.totals.total_tokens} tokens`);
-      console.log("未写入主页仓库。");
+      await githubRequest({ token, method: "GET", path: `/repos/${config.repo}` });
+      console.log(`dry-run 将同步到 ${config.repo}#${config.branch}`);
+      console.log(`累计 ${built.all_time.totals.total_tokens} tokens，估算 $${built.all_time.totals.estimated_cost_usd}，今日 ${built.today_usage.totals.total_tokens} tokens`);
+      console.log("未写入仓库。");
       return;
     }
-    const result = await publishProfile({
-      profileDir: opts.profileDir,
+    const result = await publishToGitHub({
       snapshot: built,
+      repo: config.repo,
+      branch: config.branch,
+      token,
       allowEmpty: opts.allowEmpty,
     });
-    const line = `${new Date().toISOString()} ${result.status} ${result.commit || ""} 累计 ${result.snapshot.all_time.totals.total_tokens} 今日 ${result.snapshot.today_usage.totals.total_tokens}`;
+    const line = `${new Date().toISOString()} ${result.status} ${result.repo} ${result.commit || ""} 累计 ${result.snapshot.all_time.totals.total_tokens} 今日 ${result.snapshot.today_usage.totals.total_tokens}`;
     appendLog(redact(line));
     console.log(line);
   } finally {
@@ -196,6 +230,10 @@ async function cmdGithubProfileSync(argv) {
     const opts = parseArgs(argv);
     if (opts.action === "help") {
       printHelp();
+      return;
+    }
+    if (opts.action === "setup") {
+      setup(opts);
       return;
     }
     if (opts.action === "install-agent") {

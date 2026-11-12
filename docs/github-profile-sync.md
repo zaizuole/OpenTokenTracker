@@ -27,13 +27,26 @@ assets/tokentracker/cost.svg
 README.md 里的 tokentracker-usage 区块
 ```
 
-徽章是累计 Tokens 和累计估算费用。Rank 不保留，单机数据不能推出全球排名。费用文案写明是估算。
+徽章是累计 Tokens 和累计估算费用。README 只保留一行内容更新时间、累计和今日数字。
+
+## 给别人用
+
+每人自己配置仓库和 GitHub token。token 只留在本机 `~/.tokentracker/github-sync.json`，权限 600，不进仓库、不进日志。
+
+```bash
+node bin/tracker.js github-profile-sync setup --repo owner/name --token-file /path/to/token
+node bin/tracker.js github-profile-sync --dry-run
+node bin/tracker.js github-profile-sync install-agent
+```
+
+token 需要目标仓库的 Contents 写权限。经典 PAT 勾选 `repo`；fine-grained token 只给这一个仓库的 Contents 读写。不写 token 时，先用环境变量 `TOKENTRACKER_GITHUB_TOKEN`，再否则用本机 `gh auth token`。
+
+推送走 GitHub Git 接口，一次提交写入 JSON、SVG 和 README 区块。不需要事先克隆主页仓库，也不使用 SSH。
 
 ## 命令
 
-在 `/Volumes/xcode/codex-work/TokenTracker`：
-
 ```bash
+node bin/tracker.js github-profile-sync setup --repo owner/name [--branch main] [--token-file 文件]
 node bin/tracker.js github-profile-sync --dry-run --check-local-api
 node bin/tracker.js github-profile-sync
 node bin/tracker.js github-profile-sync install-agent
@@ -41,7 +54,7 @@ node bin/tracker.js github-profile-sync status
 node bin/tracker.js github-profile-sync uninstall-agent
 ```
 
-`install-agent` 写入 `~/Library/LaunchAgents/com.zaizuole.tokentracker-github-sync.plist`，每 15 分钟运行一次。LaunchAgent 只带 `HOME`、`PATH`、`LANG`，不写凭据。Git 推送走本机已有的 SSH，并且 `BatchMode` 禁止交互式询问。
+`install-agent` 写入 `~/Library/LaunchAgents/com.zaizuole.tokentracker-github-sync.plist`，每 15 分钟运行一次。任务只带 `HOME`、`PATH`、`LANG`，从上面的配置文件读仓库和 token。
 
 电脑睡眠或断网时这一轮不会跑。醒来后的下一次会补传。已有一轮在跑时，新的一轮直接跳过。
 
