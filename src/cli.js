@@ -1,14 +1,3 @@
-const { cmdInit } = require("./commands/init");
-const { cmdSync } = require("./commands/sync");
-const { cmdStatus } = require("./commands/status");
-const { cmdDiagnostics } = require("./commands/diagnostics");
-const { cmdDoctor } = require("./commands/doctor");
-const { cmdUninstall } = require("./commands/uninstall");
-const { cmdServe } = require("./commands/serve");
-const { cmdDeviceLogin } = require("./commands/device-login");
-const { cmdWrapped } = require("./commands/wrapped");
-const { cmdSessions } = require("./commands/sessions");
-
 async function run(argv) {
   // Best-effort Sentry init (no-op without DSN / when telemetry opted out).
   try {
@@ -41,34 +30,37 @@ async function run(argv) {
 
   switch (command) {
     case "serve":
-      await cmdServe(rest);
+      await require("./commands/serve").cmdServe(rest);
       return;
     case "init":
-      await cmdInit(rest);
+      await require("./commands/init").cmdInit(rest);
       return;
     case "sync":
-      await cmdSync(rest);
+      await require("./commands/sync").cmdSync(rest);
       return;
     case "status":
-      await cmdStatus(rest);
+      await require("./commands/status").cmdStatus(rest);
       return;
     case "diagnostics":
-      await cmdDiagnostics(rest);
+      await require("./commands/diagnostics").cmdDiagnostics(rest);
       return;
     case "doctor":
-      await cmdDoctor(rest);
+      await require("./commands/doctor").cmdDoctor(rest);
       return;
     case "uninstall":
-      await cmdUninstall(rest);
+      await require("./commands/uninstall").cmdUninstall(rest);
       return;
     case "device-login":
-      await cmdDeviceLogin(rest);
+      await require("./commands/device-login").cmdDeviceLogin(rest);
       return;
     case "wrapped":
-      await cmdWrapped(rest);
+      await require("./commands/wrapped").cmdWrapped(rest);
       return;
     case "sessions":
-      await cmdSessions(rest);
+      await require("./commands/sessions").cmdSessions(rest);
+      return;
+    case "github-profile-sync":
+      await require("./commands/github-profile-sync").cmdGithubProfileSync(rest);
       return;
     default:
       throw new Error(`Unknown command: ${command}`);
@@ -94,6 +86,8 @@ function printHelp() {
       "  npx tokentracker [--debug] device-login [--json] [--base-url <url>]",
       "  npx tokentracker [--debug] wrapped [--year 2026] [--json]",
       "  npx tokentracker sessions [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--format json|csv] [--out file] [--refresh] [--no-git]",
+      "  npx tokentracker github-profile-sync [--dry-run] [--check-local-api] [--queue path] [--profile dir]",
+      "  npx tokentracker github-profile-sync install-agent|uninstall-agent|status",
       "",
       "Notes:",
       "  - init: consent first, local setup next, browser sign-in last.",

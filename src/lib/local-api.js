@@ -4117,4 +4117,8 @@ module.exports = {
   // Local achievement compute — exported for test/local-achievements.test.js.
   computeLocalAchievements,
   LOCAL_BADGE_THRESHOLDS,
+  // Day keys for the personal GitHub summary. Same functions the local
+  // usage endpoints use, so Asia/Shanghai boundaries cannot drift.
+  getZonedParts,
+  formatPartsDayKey,
 };
