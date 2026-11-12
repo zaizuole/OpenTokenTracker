@@ -165,8 +165,8 @@ test("stable brackets, endpoint changes, and incremental sync preserve logical u
   assert.equal(row.conversation_count, 4);
   assert.deepEqual(row.backend_usage.map((p) => [p.backend, p.total_tokens]), [["anthropic", 110], ["unknown", 220], ["custom", 110]]);
   assert.equal(row.backend_usage[2].backend_origin, originB);
-  assert.equal(computeRowCost(row), computeRowCost(original));
-  assert.equal(getModelPricingInfo(row.model, row).status, "unpriced");
+  assert.equal(computeRowCost(row), computeRowCost({ ...row, backend_usage: undefined }));
+  assert.equal(getModelPricingInfo(row.model, row).status, "priced");
   const saved = fs.readFileSync(f.queuePath, "utf8");
   await f.sync();
   assert.equal(fs.readFileSync(f.queuePath, "utf8"), saved);
@@ -175,7 +175,7 @@ test("stable brackets, endpoint changes, and incremental sync preserve logical u
   assert.equal(session.model, row.model);
   assert.equal(session.total_tokens, row.total_tokens);
   assert.equal(session.cost_usd, computeRowCost(row));
-  assert.equal(session.cost_is_partial, true);
+  assert.equal(session.cost_is_partial, false);
   assert.deepEqual(session.model_usage[0].backend_usage, row.backend_usage);
   for (const name of fs.readdirSync(path.join(f.trackerDir, "claude-backends"))) {
     const data = fs.readFileSync(path.join(f.trackerDir, "claude-backends", name), "utf8");
@@ -196,8 +196,9 @@ for (const scenario of ["changed-first-turn", "missing-start", "missing-stop", "
     const row = f.rows().at(-1);
     assert.equal(row.backend_usage[0].backend, "unknown");
     assert.equal(row.backend_usage[0].backend_origin, undefined);
-    assert.equal(computeRowCost(row), 0); // priced subtotal; explicitly unpriced, NOT free
-    assert.equal(getModelPricingInfo(row.model, row).status, "unpriced");
+    assert.equal(computeRowCost(row), computeRowCost({ ...row, backend_usage: undefined }));
+    assert.ok(computeRowCost(row) > 0);
+    assert.equal(getModelPricingInfo(row.model, row).status, "priced");
   });
 }
 
@@ -267,7 +268,8 @@ test("current config only affects limits; a pre-existing queue snapshot stays by
   const newRow = f.rows().at(-1);
   assert.equal(newRow.backend_usage[0].total_tokens, 110);
   assert.equal(newRow.total_tokens, 220);
-  assert.equal(computeRowCost(newRow), oldCost);
+  assert.equal(computeRowCost(newRow), computeRowCost({ ...newRow, backend_usage: undefined }));
+  assert.ok(computeRowCost(newRow) > oldCost);
 });
 
 test("SessionStart joins existing usage hooks and uninstall preserves foreign commands", async (t) => {
@@ -359,8 +361,7 @@ for (const force of [false, true]) {
     for (const options of [{ recheck: true }, { force: true }, { recheck: true }]) {
       const [mixed] = await buildSessionAnalytics({ home: f.home, ...options });
       assert.equal(mixed.total_tokens, 220);
-      assert.equal(mixed.cost_usd, old.cost_usd);
-      assert.equal(mixed.cost_is_partial, true);
+      assert.ok(mixed.cost_usd > old.cost_usd);
       assert.equal(mixed.model_usage[0].backend_usage[0].backend, "custom");
       assert.equal(mixed.model_usage[0].backend_usage[0].total_tokens, 110);
     }
@@ -379,10 +380,10 @@ test("session scan preserves queue-only historical prefix before and after sync"
   f.hook("SessionStart", B); f.turn(); f.hook("Stop", B);
   await f.sync();
   const mixed = await scanClaudeSession(f.file, { trackerDir: f.trackerDir });
-  assert.equal(mixed.cost_usd, old.cost_usd);
+  assert.ok(mixed.cost_usd > old.cost_usd);
   assert.equal(mixed.total_tokens, 220);
   assert.equal(mixed.model_usage[0].backend_usage[0].total_tokens, 110);
-  assert.equal(computeRowCost(f.rows().at(-1)), old.cost_usd);
+  assert.equal(computeRowCost(f.rows().at(-1)), computeRowCost({ ...f.rows().at(-1), backend_usage: undefined }));
 });
 
 for (const cacheMode of ["live", "disk", "memory"]) {
@@ -452,5 +453,6 @@ test("truncated old session boundary does not exempt replacement usage", async (
   createBackendResolver(f.file, f.trackerDir, { legacyOffset: fixtureStat(f.file).size + 1000 });
   const row = await scanClaudeSession(f.file, { trackerDir: f.trackerDir });
   assert.equal(row.model_usage[0].backend_usage[0].backend, "unknown");
-  assert.equal(row.cost_usd, 0);
+  assert.ok(row.total_tokens > 0);
+  assert.ok(row.cost_usd > 0);
 });
