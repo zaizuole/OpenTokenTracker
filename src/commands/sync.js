@@ -3607,7 +3607,7 @@ async function cmdSync(argv, context = {}) {
     let uploadAttempted = false;
     let autoUploadDecision = null;
 
-    if (canUpload() && (opts.auto || opts.publishAccount) && runtime.deviceToken && runtime.baseUrl &&
+    if (process.env.TOKENTRACKER_OPEN !== "1" && canUpload() && (opts.auto || opts.publishAccount) && runtime.deviceToken && runtime.baseUrl &&
         (!isBackgroundLightweightSync || opts.publishAccount)) {
       const uploadStateBefore = (await readJson(queueStatePath)) || { offset: 0 };
       const queueSizeBefore = await safeStatSize(queuePath);
